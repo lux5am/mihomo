@@ -108,7 +108,7 @@ func (sd *Dispatcher) TCPSniff(conn *N.BufferedConn, metadata *C.Metadata) bool 
 		host, err := sd.sniffDomain(conn, metadata)
 		if err != nil {
 			sd.cacheSniffFailed(metadata)
-			log.Debugln("[Sniffer] All sniffing sniff failed with from [%s:%d] to [%s:%d]", metadata.SrcIP, metadata.SrcPort, metadata.String(), metadata.DstPort)
+			log.Debugln("[Sniffer] All sniffing sniff failed with from [%s:%d] to [%s:%d]", metadata.SrcIP, metadata.SrcPort, metadata.DstString(), metadata.DstPort)
 			return false
 		}
 
