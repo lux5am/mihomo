@@ -192,10 +192,10 @@ func (m *Metadata) SourceValid() bool {
 
 func (m *Metadata) AddrType() int {
 	switch true {
-	case m.Host != "" || !m.DstIP.IsValid():
-		return socks5.AtypDomainName
 	case m.DstIP.Is4():
 		return socks5.AtypIPv4
+	case m.Host != "" || !m.DstIP.IsValid():
+		return socks5.AtypDomainName
 	default:
 		return socks5.AtypIPv6
 	}
@@ -236,11 +236,21 @@ func (m *Metadata) UDPAddr() *net.UDPAddr {
 	return net.UDPAddrFromAddrPort(m.AddrPort())
 }
 
-func (m *Metadata) String() string {
+func (m *Metadata) DstString() string {
 	if m.Host != "" {
 		return m.Host
 	} else if m.DstIP.IsValid() {
 		return m.DstIP.String()
+	} else {
+		return "<nil>"
+	}
+}
+
+func (m *Metadata) String() string {
+	if m.DstIP.IsValid() {
+		return m.DstIP.String()
+	} else if m.Host != "" {
+		return m.Host
 	} else {
 		return "<nil>"
 	}
