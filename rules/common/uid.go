@@ -47,7 +47,7 @@ func (u *Uid) Match(metadata *C.Metadata) (bool, string) {
 			return true, u.adapter
 		}
 	}
-	log.Warnln("[UID] could not get uid from %s", metadata.String())
+	log.Warnln("[UID] could not get uid from %s", metadata.DstString())
 	return false, ""
 }
 
