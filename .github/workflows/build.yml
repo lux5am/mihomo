@@ -246,11 +246,19 @@ jobs:
         GOMIPS: ${{matrix.jobs.gomips}}
       run: |
         go env
-        go build -v -tags "with_gvisor" -trimpath -ldflags "${BUILDTAG} -X 'github.com/metacubex/mihomo/constant.Version=${VERSION}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${BUILDTIME}' -w -s -buildid="
+        go build -v -tags "with_gvisor,with_low_memory" -trimpath -ldflags "${BUILDTAG} -X 'github.com/metacubex/mihomo/constant.Version=${VERSION}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${BUILDTIME}' -w -s -buildid="
+        # sudo apt-get install -y upx; UPX=$(which upx)
+        # UPX=$(curl -sL $(curl -sL "https://api.github.com/repos/upx/upx/releases/latest" |jq -r '.assets[].browser_download_url' |grep 'amd64' |head -1)  |tar xvJf - |grep '/upx$')
+        UPX="$(curl -sL "https://github.com/upx/upx/releases$(curl -sL "https://github.com/upx/upx/releases$(curl -sL "https://github.com/upx/upx/releases/latest" | grep -Eo '/expanded_assets/[^\"]+')" | grep -Eo '/download/[^"]+amd64_linux[^"]+')" |tar xvJf - |grep '/upx$')"
         if [ "${{matrix.jobs.goos}}" = "windows" ]; then
+          $UPX --lzma --best mihomo.exe || true
           cp mihomo.exe mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}.exe
           zip -r mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}-${VERSION}.zip mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}.exe
         else
+          # if [ "${{matrix.jobs.goos}}" = "linux" ] && [ "${{matrix.jobs.goarch}}" = "arm64" ]; then
+            # UPX=$(curl -L $(curl -sL "https://api.github.com/repos/upx/upx/releases/latest" |jq -r '.assets[].browser_download_url' |grep 'amd64' |head -1)  |tar xvJf - |grep '/upx$')
+            $UPX --lzma --best mihomo || true
+          # fi
           cp mihomo mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}
           gzip -c mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}} > mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}-${VERSION}.gz
           rm mihomo-${{matrix.jobs.goos}}-${{matrix.jobs.output}}
