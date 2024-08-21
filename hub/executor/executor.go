@@ -23,9 +23,9 @@ import (
 	"github.com/metacubex/mihomo/component/resolver"
 	SNI "github.com/metacubex/mihomo/component/sniffer"
 	"github.com/metacubex/mihomo/component/trie"
+	"github.com/metacubex/mihomo/component/updater"
 	"github.com/metacubex/mihomo/config"
 	C "github.com/metacubex/mihomo/constant"
-	"github.com/metacubex/mihomo/constant/features"
 	"github.com/metacubex/mihomo/constant/provider"
 	"github.com/metacubex/mihomo/dns"
 	"github.com/metacubex/mihomo/listener"
@@ -113,6 +113,7 @@ func ApplyConfig(cfg *config.Config, force bool) {
 	runtime.GC()
 	tunnel.OnRunning()
 	hcCompatibleProvider(cfg.Providers)
+	initExternalUI()
 
 	log.SetLevel(cfg.General.LogLevel)
 }
@@ -180,9 +181,6 @@ func updateListeners(general *config.General, listeners map[string]C.InboundList
 	listener.ReCreateHTTP(general.Port, tunnel.Tunnel)
 	listener.ReCreateSocks(general.SocksPort, tunnel.Tunnel)
 	listener.ReCreateRedir(general.RedirPort, tunnel.Tunnel)
-	if !features.CMFA {
-		listener.ReCreateAutoRedir(general.EBpf.AutoRedir, tunnel.Tunnel)
-	}
 	listener.ReCreateTProxy(general.TProxyPort, tunnel.Tunnel)
 	listener.ReCreateMixed(general.MixedPort, tunnel.Tunnel)
 	listener.ReCreateShadowSocks(general.ShadowSocksConfig, tunnel.Tunnel)
@@ -220,25 +218,20 @@ func updateDNS(c *config.DNS, generalIPv6 bool) {
 		return
 	}
 	cfg := dns.Config{
-		Main:         c.NameServer,
-		Fallback:     c.Fallback,
-		IPv6:         c.IPv6 && generalIPv6,
-		IPv6Timeout:  c.IPv6Timeout,
-		EnhancedMode: c.EnhancedMode,
-		Pool:         c.FakeIPRange,
-		Hosts:        c.Hosts,
-		FallbackFilter: dns.FallbackFilter{
-			GeoIP:     c.FallbackFilter.GeoIP,
-			GeoIPCode: c.FallbackFilter.GeoIPCode,
-			IPCIDR:    c.FallbackFilter.IPCIDR,
-			Domain:    c.FallbackFilter.Domain,
-			GeoSite:   c.FallbackFilter.GeoSite,
-		},
-		Default:        c.DefaultNameserver,
-		Policy:         c.NameServerPolicy,
-		ProxyServer:    c.ProxyServerNameserver,
-		Tunnel:         tunnel.Tunnel,
-		CacheAlgorithm: c.CacheAlgorithm,
+		Main:                 c.NameServer,
+		Fallback:             c.Fallback,
+		IPv6:                 c.IPv6 && generalIPv6,
+		IPv6Timeout:          c.IPv6Timeout,
+		EnhancedMode:         c.EnhancedMode,
+		Pool:                 c.FakeIPRange,
+		Hosts:                c.Hosts,
+		FallbackIPFilter:     c.FallbackIPFilter,
+		FallbackDomainFilter: c.FallbackDomainFilter,
+		Default:              c.DefaultNameserver,
+		Policy:               c.NameServerPolicy,
+		ProxyServer:          c.ProxyServerNameserver,
+		Tunnel:               tunnel.Tunnel,
+		CacheAlgorithm:       c.CacheAlgorithm,
 	}
 
 	r := dns.NewResolver(cfg)
@@ -355,7 +348,6 @@ func updateTun(general *config.General) {
 		return
 	}
 	listener.ReCreateTun(general.Tun, tunnel.Tunnel)
-	listener.ReCreateRedirToTun(general.EBpf.RedirectToTun)
 }
 
 func updateSniffer(sniffer *config.Sniffer) {
@@ -383,6 +375,18 @@ func updateSniffer(sniffer *config.Sniffer) {
 
 func updateTunnels(tunnels []LC.Tunnel) {
 	listener.PatchTunnel(tunnels, tunnel.Tunnel)
+}
+
+func initExternalUI() {
+	if updater.ExternalUIFolder != "" {
+		dirEntries, _ := os.ReadDir(updater.ExternalUIFolder)
+		if len(dirEntries) > 0 {
+			log.Infoln("UI already exists")
+		} else {
+			log.Infoln("UI not exists, downloading")
+			updater.UpdateUI()
+		}
+	}
 }
 
 func updateGeneral(general *config.General) {

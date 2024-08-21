@@ -20,9 +20,9 @@ import (
 	N "github.com/metacubex/mihomo/common/net"
 	"github.com/metacubex/mihomo/common/utils"
 	"github.com/metacubex/mihomo/component/auth"
+	"github.com/metacubex/mihomo/component/cidr"
 	"github.com/metacubex/mihomo/component/fakeip"
 	"github.com/metacubex/mihomo/component/geodata"
-	"github.com/metacubex/mihomo/component/geodata/router"
 	P "github.com/metacubex/mihomo/component/process"
 	"github.com/metacubex/mihomo/component/resolver"
 	SNIFF "github.com/metacubex/mihomo/component/sniffer"
@@ -38,6 +38,7 @@ import (
 	LC "github.com/metacubex/mihomo/listener/config"
 	"github.com/metacubex/mihomo/log"
 	R "github.com/metacubex/mihomo/rules"
+	RC "github.com/metacubex/mihomo/rules/common"
 	RP "github.com/metacubex/mihomo/rules/provider"
 	T "github.com/metacubex/mihomo/tunnel"
 
@@ -65,7 +66,6 @@ type General struct {
 	TCPConcurrent           bool              `json:"tcp-concurrent"`
 	FindProcessMode         P.FindProcessMode `json:"find-process-mode"`
 	Sniffing                bool              `json:"sniffing"`
-	EBpf                    EBpf              `json:"-"`
 	GlobalClientFingerprint string            `json:"global-client-fingerprint"`
 	GlobalUA                string            `json:"global-ua"`
 }
@@ -113,31 +113,23 @@ type NTP struct {
 
 // DNS config
 type DNS struct {
-	Enable                bool             `yaml:"enable"`
-	PreferH3              bool             `yaml:"prefer-h3"`
-	IPv6                  bool             `yaml:"ipv6"`
-	IPv6Timeout           uint             `yaml:"ipv6-timeout"`
-	UseSystemHosts        bool             `yaml:"use-system-hosts"`
-	NameServer            []dns.NameServer `yaml:"nameserver"`
-	Fallback              []dns.NameServer `yaml:"fallback"`
-	FallbackFilter        FallbackFilter   `yaml:"fallback-filter"`
-	Listen                string           `yaml:"listen"`
-	EnhancedMode          C.DNSMode        `yaml:"enhanced-mode"`
-	DefaultNameserver     []dns.NameServer `yaml:"default-nameserver"`
-	CacheAlgorithm        string           `yaml:"cache-algorithm"`
+	Enable                bool
+	PreferH3              bool
+	IPv6                  bool
+	IPv6Timeout           uint
+	UseSystemHosts        bool
+	NameServer            []dns.NameServer
+	Fallback              []dns.NameServer
+	FallbackIPFilter      []C.Rule
+	FallbackDomainFilter  []C.Rule
+	Listen                string
+	EnhancedMode          C.DNSMode
+	DefaultNameserver     []dns.NameServer
+	CacheAlgorithm        string
 	FakeIPRange           *fakeip.Pool
 	Hosts                 *trie.DomainTrie[resolver.HostValue]
-	NameServerPolicy      *orderedmap.OrderedMap[string, []dns.NameServer]
+	NameServerPolicy      []dns.Policy
 	ProxyServerNameserver []dns.NameServer
-}
-
-// FallbackFilter config
-type FallbackFilter struct {
-	GeoIP     bool                   `yaml:"geoip"`
-	GeoIPCode string                 `yaml:"geoip-code"`
-	IPCIDR    []netip.Prefix         `yaml:"ipcidr"`
-	Domain    []string               `yaml:"domain"`
-	GeoSite   []router.DomainMatcher `yaml:"geosite"`
 }
 
 // Profile config
@@ -163,8 +155,8 @@ type IPTables struct {
 type Sniffer struct {
 	Enable          bool
 	Sniffers        map[snifferTypes.Type]SNIFF.SnifferConfig
-	ForceDomain     *trie.DomainSet
-	SkipDomain      *trie.DomainSet
+	ForceDomain     []C.Rule
+	SkipDomain      []C.Rule
 	ForceDnsMapping bool
 	ParsePureIp     bool
 }
@@ -338,7 +330,9 @@ type RawConfig struct {
 	FindProcessMode         P.FindProcessMode `yaml:"find-process-mode" json:"find-process-mode"`
 	GlobalClientFingerprint string            `yaml:"global-client-fingerprint"`
 	GlobalUA                string            `yaml:"global-ua"`
+	KeepAliveIdle           int               `yaml:"keep-alive-idle"`
 	KeepAliveInterval       int               `yaml:"keep-alive-interval"`
+	DisableKeepAlive        bool              `yaml:"disable-keep-alive"`
 
 	Sniffer       RawSniffer                `yaml:"sniffer" json:"sniffer"`
 	ProxyProvider map[string]map[string]any `yaml:"proxy-providers"`
@@ -348,7 +342,6 @@ type RawConfig struct {
 	DNS           RawDNS                    `yaml:"dns" json:"dns"`
 	Tun           RawTun                    `yaml:"tun"`
 	TuicServer    RawTuicServer             `yaml:"tuic-server"`
-	EBpf          EBpf                      `yaml:"ebpf"`
 	IPTables      IPTables                  `yaml:"iptables"`
 	Experimental  Experimental              `yaml:"experimental"`
 	Profile       Profile                   `yaml:"profile"`
@@ -385,12 +378,6 @@ type RawSniffer struct {
 type RawSniffingConfig struct {
 	Ports        []string `yaml:"ports" json:"ports"`
 	OverrideDest *bool    `yaml:"override-destination" json:"override-destination"`
-}
-
-// EBpf config
-type EBpf struct {
-	RedirectToTun []string `yaml:"redirect-to-tun" json:"redirect-to-tun"`
-	AutoRedir     []string `yaml:"auto-redir" json:"auto-redir"`
 }
 
 var (
@@ -452,10 +439,6 @@ func UnmarshalRawConfig(buf []byte) (*RawConfig, error) {
 			AuthenticationTimeout: 1000,
 			ALPN:                  []string{"h3"},
 			MaxUdpRelayPacketSize: 1500,
-		},
-		EBpf: EBpf{
-			RedirectToTun: []string{},
-			AutoRedir:     []string{},
 		},
 		IPTables: IPTables{
 			Enable:           false,
@@ -624,7 +607,7 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 		}
 	}
 
-	config.Sniffer, err = parseSniffer(rawCfg.Sniffer)
+	config.Sniffer, err = parseSniffer(rawCfg.Sniffer, ruleProviders)
 	if err != nil {
 		return nil, err
 	}
@@ -649,9 +632,14 @@ func parseGeneral(cfg *RawConfig) (*General, error) {
 	C.ASNUrl = cfg.GeoXUrl.ASN
 	C.GeodataMode = cfg.GeodataMode
 	C.UA = cfg.GlobalUA
+
+	if cfg.KeepAliveIdle != 0 {
+		N.KeepAliveIdle = time.Duration(cfg.KeepAliveIdle) * time.Second
+	}
 	if cfg.KeepAliveInterval != 0 {
 		N.KeepAliveInterval = time.Duration(cfg.KeepAliveInterval) * time.Second
 	}
+	N.DisableKeepAlive = cfg.DisableKeepAlive
 
 	updater.ExternalUIPath = cfg.ExternalUI
 	// checkout externalUI exist
@@ -675,6 +663,11 @@ func parseGeneral(cfg *RawConfig) (*General, error) {
 	}
 	if cfg.ExternalUIURL != "" {
 		updater.ExternalUIURL = cfg.ExternalUIURL
+	}
+
+	err := updater.PrepareUIPath()
+	if err != nil {
+		log.Errorln("PrepareUIPath error: %s", err)
 	}
 
 	return &General{
@@ -715,7 +708,6 @@ func parseGeneral(cfg *RawConfig) (*General, error) {
 		GeodataLoader:           cfg.GeodataLoader,
 		TCPConcurrent:           cfg.TCPConcurrent,
 		FindProcessMode:         cfg.FindProcessMode,
-		EBpf:                    cfg.EBpf,
 		GlobalClientFingerprint: cfg.GlobalClientFingerprint,
 		GlobalUA:                cfg.GlobalUA,
 	}, nil
@@ -1192,49 +1184,13 @@ func parsePureDNSServer(server string) string {
 	}
 }
 
-func parseNameServerPolicy(nsPolicy *orderedmap.OrderedMap[string, any], ruleProviders map[string]providerTypes.RuleProvider, respectRules bool, preferH3 bool) (*orderedmap.OrderedMap[string, []dns.NameServer], error) {
-	policy := orderedmap.New[string, []dns.NameServer]()
-	updatedPolicy := orderedmap.New[string, any]()
+func parseNameServerPolicy(nsPolicy *orderedmap.OrderedMap[string, any], rules []C.Rule, ruleProviders map[string]providerTypes.RuleProvider, respectRules bool, preferH3 bool) ([]dns.Policy, error) {
+	var policy []dns.Policy
 	re := regexp.MustCompile(`[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}(\.[a-zA-Z]{2,})?`)
 
 	for pair := nsPolicy.Oldest(); pair != nil; pair = pair.Next() {
 		k, v := pair.Key, pair.Value
-		if strings.Contains(strings.ToLower(k), ",") {
-			if strings.Contains(k, "geosite:") {
-				subkeys := strings.Split(k, ":")
-				subkeys = subkeys[1:]
-				subkeys = strings.Split(subkeys[0], ",")
-				for _, subkey := range subkeys {
-					newKey := "geosite:" + subkey
-					updatedPolicy.Store(newKey, v)
-				}
-			} else if strings.Contains(strings.ToLower(k), "rule-set:") {
-				subkeys := strings.Split(k, ":")
-				subkeys = subkeys[1:]
-				subkeys = strings.Split(subkeys[0], ",")
-				for _, subkey := range subkeys {
-					newKey := "rule-set:" + subkey
-					updatedPolicy.Store(newKey, v)
-				}
-			} else if re.MatchString(k) {
-				subkeys := strings.Split(k, ",")
-				for _, subkey := range subkeys {
-					updatedPolicy.Store(subkey, v)
-				}
-			}
-		} else {
-			if strings.Contains(strings.ToLower(k), "geosite:") {
-				updatedPolicy.Store("geosite:"+k[8:], v)
-			} else if strings.Contains(strings.ToLower(k), "rule-set:") {
-				updatedPolicy.Store("rule-set:"+k[9:], v)
-			}
-			updatedPolicy.Store(k, v)
-		}
-	}
-
-	for pair := updatedPolicy.Oldest(); pair != nil; pair = pair.Next() {
-		domain, server := pair.Key, pair.Value
-		servers, err := utils.ToStringSlice(server)
+		servers, err := utils.ToStringSlice(v)
 		if err != nil {
 			return nil, err
 		}
@@ -1242,75 +1198,65 @@ func parseNameServerPolicy(nsPolicy *orderedmap.OrderedMap[string, any], rulePro
 		if err != nil {
 			return nil, err
 		}
-		if _, valid := trie.ValidAndSplitDomain(domain); !valid {
-			return nil, fmt.Errorf("DNS ResoverRule invalid domain: %s", domain)
+		if strings.Contains(strings.ToLower(k), ",") {
+			if strings.Contains(k, "geosite:") {
+				subkeys := strings.Split(k, ":")
+				subkeys = subkeys[1:]
+				subkeys = strings.Split(subkeys[0], ",")
+				for _, subkey := range subkeys {
+					newKey := "geosite:" + subkey
+					policy = append(policy, dns.Policy{Domain: newKey, NameServers: nameservers})
+				}
+			} else if strings.Contains(strings.ToLower(k), "rule-set:") {
+				subkeys := strings.Split(k, ":")
+				subkeys = subkeys[1:]
+				subkeys = strings.Split(subkeys[0], ",")
+				for _, subkey := range subkeys {
+					newKey := "rule-set:" + subkey
+					policy = append(policy, dns.Policy{Domain: newKey, NameServers: nameservers})
+				}
+			} else if re.MatchString(k) {
+				subkeys := strings.Split(k, ",")
+				for _, subkey := range subkeys {
+					policy = append(policy, dns.Policy{Domain: subkey, NameServers: nameservers})
+				}
+			}
+		} else {
+			if strings.Contains(strings.ToLower(k), "geosite:") {
+				policy = append(policy, dns.Policy{Domain: "geosite:" + k[8:], NameServers: nameservers})
+			} else if strings.Contains(strings.ToLower(k), "rule-set:") {
+				policy = append(policy, dns.Policy{Domain: "rule-set:" + k[9:], NameServers: nameservers})
+			} else {
+				policy = append(policy, dns.Policy{Domain: k, NameServers: nameservers})
+			}
 		}
+	}
+
+	for idx, p := range policy {
+		domain, nameservers := p.Domain, p.NameServers
+
 		if strings.HasPrefix(domain, "rule-set:") {
 			domainSetName := domain[9:]
-			if provider, ok := ruleProviders[domainSetName]; !ok {
-				return nil, fmt.Errorf("not found rule-set: %s", domainSetName)
-			} else {
-				switch provider.Behavior() {
-				case providerTypes.IPCIDR:
-					return nil, fmt.Errorf("rule provider type error, except domain,actual %s", provider.Behavior())
-				case providerTypes.Classical:
-					log.Warnln("%s provider is %s, only matching it contain domain rule", provider.Name(), provider.Behavior())
-				}
-			}
-		}
-		policy.Store(domain, nameservers)
-	}
-
-	return policy, nil
-}
-
-func parseFallbackIPCIDR(ips []string) ([]netip.Prefix, error) {
-	var ipNets []netip.Prefix
-
-	for idx, ip := range ips {
-		ipnet, err := netip.ParsePrefix(ip)
-		if err != nil {
-			return nil, fmt.Errorf("DNS FallbackIP[%d] format error: %s", idx, err.Error())
-		}
-		ipNets = append(ipNets, ipnet)
-	}
-
-	return ipNets, nil
-}
-
-func parseFallbackGeoSite(countries []string, rules []C.Rule) ([]router.DomainMatcher, error) {
-	var sites []router.DomainMatcher
-	if len(countries) > 0 {
-		if err := geodata.InitGeoSite(); err != nil {
-			return nil, fmt.Errorf("can't initial GeoSite: %s", err)
-		}
-		log.Warnln("replace fallback-filter.geosite with nameserver-policy, it will be removed in the future")
-	}
-
-	for _, country := range countries {
-		found := false
-		for _, rule := range rules {
-			if rule.RuleType() == C.GEOSITE {
-				if strings.EqualFold(country, rule.Payload()) {
-					found = true
-					sites = append(sites, rule.(C.RuleGeoSite).GetDomainMatcher())
-					log.Infoln("Start initial GeoSite dns fallback filter from rule `%s`", country)
-				}
-			}
-		}
-
-		if !found {
-			matcher, recordsCount, err := geodata.LoadGeoSiteMatcher(country)
+			rule, err := parseDomainRuleSet(domainSetName, "dns.nameserver-policy", ruleProviders)
 			if err != nil {
 				return nil, err
 			}
-
-			sites = append(sites, matcher)
-
-			log.Infoln("Start initial GeoSite dns fallback filter `%s`, records: %d", country, recordsCount)
+			policy[idx] = dns.Policy{Rule: rule, NameServers: nameservers}
+		} else if strings.HasPrefix(domain, "geosite:") {
+			country := domain[8:]
+			rule, err := RC.NewGEOSITE(country, "dns.nameserver-policy")
+			if err != nil {
+				return nil, err
+			}
+			policy[idx] = dns.Policy{Rule: rule, NameServers: nameservers}
+		} else {
+			if _, valid := trie.ValidAndSplitDomain(domain); !valid {
+				return nil, fmt.Errorf("DNS ResoverRule invalid domain: %s", domain)
+			}
 		}
 	}
-	return sites, nil
+
+	return policy, nil
 }
 
 func paresNTP(rawCfg *RawConfig) *NTP {
@@ -1344,10 +1290,6 @@ func parseDNS(rawCfg *RawConfig, hosts *trie.DomainTrie[resolver.HostValue], rul
 		IPv6:           cfg.IPv6,
 		UseSystemHosts: cfg.UseSystemHosts,
 		EnhancedMode:   cfg.EnhancedMode,
-		FallbackFilter: FallbackFilter{
-			IPCIDR:  []netip.Prefix{},
-			GeoSite: []router.DomainMatcher{},
-		},
 	}
 	var err error
 	if dnsCfg.NameServer, err = parseNameServer(cfg.NameServer, cfg.RespectRules, cfg.PreferH3); err != nil {
@@ -1358,7 +1300,7 @@ func parseDNS(rawCfg *RawConfig, hosts *trie.DomainTrie[resolver.HostValue], rul
 		return nil, err
 	}
 
-	if dnsCfg.NameServerPolicy, err = parseNameServerPolicy(cfg.NameServerPolicy, ruleProviders, cfg.RespectRules, cfg.PreferH3); err != nil {
+	if dnsCfg.NameServerPolicy, err = parseNameServerPolicy(cfg.NameServerPolicy, rules, ruleProviders, cfg.RespectRules, cfg.PreferH3); err != nil {
 		return nil, err
 	}
 
@@ -1395,27 +1337,21 @@ func parseDNS(rawCfg *RawConfig, hosts *trie.DomainTrie[resolver.HostValue], rul
 			return nil, err
 		}
 
-		var host *trie.DomainTrie[struct{}]
-		// fake ip skip host filter
-		if len(cfg.FakeIPFilter) != 0 {
-			host = trie.New[struct{}]()
-			for _, domain := range cfg.FakeIPFilter {
-				_ = host.Insert(domain, struct{}{})
-			}
-			host.Optimize()
-		}
-
+		var fakeIPTrie *trie.DomainTrie[struct{}]
 		if len(dnsCfg.Fallback) != 0 {
-			if host == nil {
-				host = trie.New[struct{}]()
-			}
+			fakeIPTrie = trie.New[struct{}]()
 			for _, fb := range dnsCfg.Fallback {
 				if net.ParseIP(fb.Addr) != nil {
 					continue
 				}
-				_ = host.Insert(fb.Addr, struct{}{})
+				_ = fakeIPTrie.Insert(fb.Addr, struct{}{})
 			}
-			host.Optimize()
+		}
+
+		// fake ip skip host filter
+		host, err := parseDomain(cfg.FakeIPFilter, fakeIPTrie, "dns.fake-ip-filter", ruleProviders)
+		if err != nil {
+			return nil, err
 		}
 
 		pool, err := fakeip.New(fakeip.Options{
@@ -1431,18 +1367,51 @@ func parseDNS(rawCfg *RawConfig, hosts *trie.DomainTrie[resolver.HostValue], rul
 		dnsCfg.FakeIPRange = pool
 	}
 
+	var rule C.Rule
 	if len(cfg.Fallback) != 0 {
-		dnsCfg.FallbackFilter.GeoIP = cfg.FallbackFilter.GeoIP
-		dnsCfg.FallbackFilter.GeoIPCode = cfg.FallbackFilter.GeoIPCode
-		if fallbackip, err := parseFallbackIPCIDR(cfg.FallbackFilter.IPCIDR); err == nil {
-			dnsCfg.FallbackFilter.IPCIDR = fallbackip
+		if cfg.FallbackFilter.GeoIP {
+			rule, err = RC.NewGEOIP(cfg.FallbackFilter.GeoIPCode, "", false, true)
+			if err != nil {
+				return nil, fmt.Errorf("load GeoIP dns fallback filter error, %w", err)
+			}
+			dnsCfg.FallbackIPFilter = append(dnsCfg.FallbackIPFilter, rule)
 		}
-		dnsCfg.FallbackFilter.Domain = cfg.FallbackFilter.Domain
-		fallbackGeoSite, err := parseFallbackGeoSite(cfg.FallbackFilter.GeoSite, rules)
-		if err != nil {
-			return nil, fmt.Errorf("load GeoSite dns fallback filter error, %w", err)
+		if len(cfg.FallbackFilter.IPCIDR) > 0 {
+			cidrSet := cidr.NewIpCidrSet()
+			for idx, ipcidr := range cfg.FallbackFilter.IPCIDR {
+				err = cidrSet.AddIpCidrForString(ipcidr)
+				if err != nil {
+					return nil, fmt.Errorf("DNS FallbackIP[%d] format error: %w", idx, err)
+				}
+			}
+			err = cidrSet.Merge()
+			if err != nil {
+				return nil, err
+			}
+			rule = RP.NewIpCidrSet(cidrSet, "dns.fallback-filter.ipcidr")
+			dnsCfg.FallbackIPFilter = append(dnsCfg.FallbackIPFilter, rule)
 		}
-		dnsCfg.FallbackFilter.GeoSite = fallbackGeoSite
+		if len(cfg.FallbackFilter.Domain) > 0 {
+			domainTrie := trie.New[struct{}]()
+			for idx, domain := range cfg.FallbackFilter.Domain {
+				err = domainTrie.Insert(domain, struct{}{})
+				if err != nil {
+					return nil, fmt.Errorf("DNS FallbackDomain[%d] format error: %w", idx, err)
+				}
+			}
+			rule = RP.NewDomainSet(domainTrie.NewDomainSet(), "dns.fallback-filter.domain")
+			dnsCfg.FallbackIPFilter = append(dnsCfg.FallbackIPFilter, rule)
+		}
+		if len(cfg.FallbackFilter.GeoSite) > 0 {
+			log.Warnln("replace fallback-filter.geosite with nameserver-policy, it will be removed in the future")
+			for idx, geoSite := range cfg.FallbackFilter.GeoSite {
+				rule, err = RC.NewGEOSITE(geoSite, "dns.fallback-filter.geosite")
+				if err != nil {
+					return nil, fmt.Errorf("DNS FallbackGeosite[%d] format error: %w", idx, err)
+				}
+				dnsCfg.FallbackIPFilter = append(dnsCfg.FallbackIPFilter, rule)
+			}
+		}
 	}
 
 	if cfg.UseHosts {
@@ -1542,7 +1511,7 @@ func parseTuicServer(rawTuic RawTuicServer, general *General) error {
 	return nil
 }
 
-func parseSniffer(snifferRaw RawSniffer) (*Sniffer, error) {
+func parseSniffer(snifferRaw RawSniffer, ruleProviders map[string]providerTypes.RuleProvider) (*Sniffer, error) {
 	sniffer := &Sniffer{
 		Enable:          snifferRaw.Enable,
 		ForceDnsMapping: snifferRaw.ForceDnsMapping,
@@ -1605,23 +1574,75 @@ func parseSniffer(snifferRaw RawSniffer) (*Sniffer, error) {
 
 	sniffer.Sniffers = loadSniffer
 
-	forceDomainTrie := trie.New[struct{}]()
-	for _, domain := range snifferRaw.ForceDomain {
-		err := forceDomainTrie.Insert(domain, struct{}{})
-		if err != nil {
-			return nil, fmt.Errorf("error domian[%s] in force-domain, error:%v", domain, err)
-		}
+	forceDomain, err := parseDomain(snifferRaw.ForceDomain, nil, "sniffer.force-domain", ruleProviders)
+	if err != nil {
+		return nil, fmt.Errorf("error in force-domain, error:%w", err)
 	}
-	sniffer.ForceDomain = forceDomainTrie.NewDomainSet()
+	sniffer.ForceDomain = forceDomain
 
-	skipDomainTrie := trie.New[struct{}]()
-	for _, domain := range snifferRaw.SkipDomain {
-		err := skipDomainTrie.Insert(domain, struct{}{})
-		if err != nil {
-			return nil, fmt.Errorf("error domian[%s] in force-domain, error:%v", domain, err)
-		}
+	skipDomain, err := parseDomain(snifferRaw.SkipDomain, nil, "sniffer.skip-domain", ruleProviders)
+	if err != nil {
+		return nil, fmt.Errorf("error in skip-domain, error:%w", err)
 	}
-	sniffer.SkipDomain = skipDomainTrie.NewDomainSet()
+	sniffer.SkipDomain = skipDomain
 
 	return sniffer, nil
+}
+
+func parseDomain(domains []string, domainTrie *trie.DomainTrie[struct{}], adapterName string, ruleProviders map[string]providerTypes.RuleProvider) (domainRules []C.Rule, err error) {
+	var rule C.Rule
+	for _, domain := range domains {
+		domainLower := strings.ToLower(domain)
+		if strings.Contains(domainLower, "geosite:") {
+			subkeys := strings.Split(domain, ":")
+			subkeys = subkeys[1:]
+			subkeys = strings.Split(subkeys[0], ",")
+			for _, country := range subkeys {
+				rule, err = RC.NewGEOSITE(country, adapterName)
+				if err != nil {
+					return nil, err
+				}
+				domainRules = append(domainRules, rule)
+			}
+		} else if strings.Contains(domainLower, "rule-set:") {
+			subkeys := strings.Split(domain, ":")
+			subkeys = subkeys[1:]
+			subkeys = strings.Split(subkeys[0], ",")
+			for _, domainSetName := range subkeys {
+				rule, err = parseDomainRuleSet(domainSetName, adapterName, ruleProviders)
+				if err != nil {
+					return nil, err
+				}
+				domainRules = append(domainRules, rule)
+			}
+		} else {
+			if domainTrie == nil {
+				domainTrie = trie.New[struct{}]()
+			}
+			err = domainTrie.Insert(domain, struct{}{})
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if !domainTrie.IsEmpty() {
+		rule = RP.NewDomainSet(domainTrie.NewDomainSet(), adapterName)
+		domainRules = append(domainRules, rule)
+	}
+	return
+}
+
+func parseDomainRuleSet(domainSetName string, adapterName string, ruleProviders map[string]providerTypes.RuleProvider) (C.Rule, error) {
+	if rp, ok := ruleProviders[domainSetName]; !ok {
+		return nil, fmt.Errorf("not found rule-set: %s", domainSetName)
+	} else {
+		switch rp.Behavior() {
+		case providerTypes.IPCIDR:
+			return nil, fmt.Errorf("rule provider type error, except domain,actual %s", rp.Behavior())
+		case providerTypes.Classical:
+			log.Warnln("%s provider is %s, only matching it contain domain rule", rp.Name(), rp.Behavior())
+		default:
+		}
+	}
+	return RP.NewRuleSet(domainSetName, adapterName, true)
 }

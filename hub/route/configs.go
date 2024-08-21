@@ -402,23 +402,11 @@ func updateConfigs(w http.ResponseWriter, r *http.Request) {
 func updateGeoDatabases(w http.ResponseWriter, r *http.Request) {
 	err := updater.UpdateGeoDatabases()
 	if err != nil {
-		log.Errorln("[REST-API] update GEO databases failed: %v", err)
+		log.Errorln("[GEO] update GEO databases failed: %v", err)
 		render.Status(r, http.StatusInternalServerError)
 		render.JSON(w, r, newError(err.Error()))
 		return
 	}
-
-	cfg, err := executor.ParseWithPath(C.Path.Config())
-	if err != nil {
-		log.Errorln("[REST-API] update GEO databases failed: %v", err)
-		render.Status(r, http.StatusInternalServerError)
-		render.JSON(w, r, newError("Error parsing configuration"))
-		return
-	}
-
-	log.Warnln("[GEO] update GEO databases success, applying config")
-
-	executor.ApplyConfig(cfg, false)
 
 	render.NoContent(w, r)
 }
