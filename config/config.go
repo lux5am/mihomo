@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
-	"path"
 	"strings"
 	"time"
 
@@ -21,14 +20,12 @@ import (
 	"github.com/metacubex/mihomo/component/fakeip"
 	"github.com/metacubex/mihomo/component/geodata"
 	mihomoHttp "github.com/metacubex/mihomo/component/http"
-	"github.com/metacubex/mihomo/component/keepalive"
 	P "github.com/metacubex/mihomo/component/process"
 	"github.com/metacubex/mihomo/component/resolver"
 	"github.com/metacubex/mihomo/component/resource"
 	"github.com/metacubex/mihomo/component/sniffer"
 	tlsC "github.com/metacubex/mihomo/component/tls"
 	"github.com/metacubex/mihomo/component/trie"
-	"github.com/metacubex/mihomo/component/updater"
 	C "github.com/metacubex/mihomo/constant"
 	providerTypes "github.com/metacubex/mihomo/constant/provider"
 	snifferTypes "github.com/metacubex/mihomo/constant/sniffer"
@@ -67,6 +64,9 @@ type General struct {
 	GlobalClientFingerprint string            `json:"global-client-fingerprint"`
 	GlobalUA                string            `json:"global-ua"`
 	ETagSupport             bool              `json:"etag-support"`
+	KeepAliveIdle           int               `json:"keep-alive-idle"`
+	KeepAliveInterval       int               `json:"keep-alive-interval"`
+	DisableKeepAlive        bool              `json:"disable-keep-alive"`
 }
 
 // Inbound config
@@ -105,6 +105,8 @@ type Controller struct {
 	ExternalControllerUnix string
 	ExternalControllerPipe string
 	ExternalUI             string
+	ExternalUIURL          string
+	ExternalUIName         string
 	ExternalDohServer      string
 	Secret                 string
 	Cors                   Cors
@@ -706,8 +708,6 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 }
 
 func parseGeneral(cfg *RawConfig) (*General, error) {
-	updater.SetGeoAutoUpdate(cfg.GeoAutoUpdate)
-	updater.SetGeoUpdateInterval(cfg.GeoUpdateInterval)
 	geodata.SetGeodataMode(cfg.GeodataMode)
 	geodata.SetLoader(cfg.GeodataLoader)
 	geodata.SetSiteMatcher(cfg.GeositeMatcher)
@@ -717,33 +717,6 @@ func parseGeneral(cfg *RawConfig) (*General, error) {
 	geodata.SetASNUrl(cfg.GeoXUrl.ASN)
 	mihomoHttp.SetUA(cfg.GlobalUA)
 	resource.SetETag(cfg.ETagSupport)
-
-	if cfg.KeepAliveIdle != 0 {
-		keepalive.SetKeepAliveIdle(time.Duration(cfg.KeepAliveIdle) * time.Second)
-	}
-	if cfg.KeepAliveInterval != 0 {
-		keepalive.SetKeepAliveInterval(time.Duration(cfg.KeepAliveInterval) * time.Second)
-	}
-	keepalive.SetDisableKeepAlive(cfg.DisableKeepAlive)
-
-	// checkout externalUI exist
-	if cfg.ExternalUI != "" {
-		updater.AutoDownloadUI = true
-		updater.ExternalUIPath = C.Path.Resolve(cfg.ExternalUI)
-	} else {
-		// default externalUI path
-		updater.ExternalUIPath = path.Join(C.Path.HomeDir(), "ui")
-	}
-
-	// checkout UIpath/name exist
-	if cfg.ExternalUIName != "" {
-		updater.AutoDownloadUI = true
-		updater.ExternalUIPath = path.Join(updater.ExternalUIPath, cfg.ExternalUIName)
-	}
-
-	if cfg.ExternalUIURL != "" {
-		updater.ExternalUIURL = cfg.ExternalUIURL
-	}
 
 	return &General{
 		Inbound: Inbound{
@@ -783,6 +756,9 @@ func parseGeneral(cfg *RawConfig) (*General, error) {
 		GlobalClientFingerprint: cfg.GlobalClientFingerprint,
 		GlobalUA:                cfg.GlobalUA,
 		ETagSupport:             cfg.ETagSupport,
+		KeepAliveIdle:           cfg.KeepAliveIdle,
+		KeepAliveInterval:       cfg.KeepAliveInterval,
+		DisableKeepAlive:        cfg.DisableKeepAlive,
 	}, nil
 }
 
@@ -790,6 +766,8 @@ func parseController(cfg *RawConfig) (*Controller, error) {
 	return &Controller{
 		ExternalController:     cfg.ExternalController,
 		ExternalUI:             cfg.ExternalUI,
+		ExternalUIURL:          cfg.ExternalUIURL,
+		ExternalUIName:         cfg.ExternalUIName,
 		Secret:                 cfg.Secret,
 		ExternalControllerPipe: cfg.ExternalControllerPipe,
 		ExternalControllerUnix: cfg.ExternalControllerUnix,

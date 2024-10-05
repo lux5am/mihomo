@@ -19,6 +19,7 @@ import (
 	G "github.com/metacubex/mihomo/component/geodata"
 	mihomoHttp "github.com/metacubex/mihomo/component/http"
 	"github.com/metacubex/mihomo/component/iface"
+	"github.com/metacubex/mihomo/component/keepalive"
 	"github.com/metacubex/mihomo/component/profile"
 	"github.com/metacubex/mihomo/component/profile/cachefile"
 	"github.com/metacubex/mihomo/component/resolver"
@@ -117,7 +118,7 @@ func ApplyConfig(cfg *config.Config, force bool) {
 	runtime.GC()
 	tunnel.OnRunning()
 	hcCompatibleProvider(cfg.Providers)
-	initExternalUI()
+	updateUpdater(cfg)
 
 	resolver.ResetConnection()
 }
@@ -176,6 +177,9 @@ func GetGeneral() *config.General {
 		GlobalClientFingerprint: tlsC.GetGlobalFingerprint(),
 		GlobalUA:                mihomoHttp.UA(),
 		ETagSupport:             resource.ETag(),
+		KeepAliveInterval:       int(keepalive.KeepAliveInterval() / time.Second),
+		KeepAliveIdle:           int(keepalive.KeepAliveIdle() / time.Second),
+		DisableKeepAlive:        keepalive.DisableKeepAlive(),
 	}
 
 	return general
@@ -394,16 +398,14 @@ func updateTunnels(tunnels []LC.Tunnel) {
 	listener.PatchTunnel(tunnels, tunnel.Tunnel)
 }
 
-func initExternalUI() {
-	if updater.AutoDownloadUI {
-		dirEntries, _ := os.ReadDir(updater.ExternalUIPath)
-		if len(dirEntries) > 0 {
-			log.Infoln("UI already exists, skip downloading")
-		} else {
-			log.Infoln("External UI downloading ...")
-			updater.DownloadUI()
-		}
-	}
+func updateUpdater(cfg *config.Config) {
+	general := cfg.General
+	updater.SetGeoAutoUpdate(general.GeoAutoUpdate)
+	updater.SetGeoUpdateInterval(general.GeoUpdateInterval)
+
+	controller := cfg.Controller
+	updater.DefaultUiUpdater = updater.NewUiUpdater(controller.ExternalUI, controller.ExternalUIURL, controller.ExternalUIName)
+	updater.DefaultUiUpdater.AutoDownloadUI()
 }
 
 func updateGeneral(general *config.General) {
@@ -418,6 +420,10 @@ func updateGeneral(general *config.General) {
 
 	inbound.SetTfo(general.InboundTfo)
 	inbound.SetMPTCP(general.InboundMPTCP)
+
+	keepalive.SetKeepAliveIdle(time.Duration(general.KeepAliveIdle) * time.Second)
+	keepalive.SetKeepAliveInterval(time.Duration(general.KeepAliveInterval) * time.Second)
+	keepalive.SetDisableKeepAlive(general.DisableKeepAlive)
 
 	adapter.UnifiedDelay.Store(general.UnifiedDelay)
 
