@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/metacubex/mihomo/common/atomic"
+	C "github.com/metacubex/mihomo/constant"
 
 	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/shirou/gopsutil/v3/process"
@@ -82,7 +83,9 @@ func (m *Manager) Memory() uint64 {
 func (m *Manager) Snapshot() *Snapshot {
 	var connections []*TrackerInfo
 	m.Range(func(c Tracker) bool {
-		connections = append(connections, c.Info())
+		if c.Info().Metadata.ProxyType != C.Dns {
+			connections = append(connections, c.Info())
+		}
 		return true
 	})
 	return &Snapshot{

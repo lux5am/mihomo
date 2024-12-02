@@ -409,6 +409,7 @@ func handleUDPConn(packet C.PacketAdapter) {
 			}
 			logMetadata(metadata, rule, rawPc)
 
+			metadata.ProxyType = proxy.Type()
 			pc := statistic.NewUDPTracker(rawPc, statistic.DefaultManager, metadata, rule, 0, 0, true)
 
 			if rawPc.Chains().Last() == "REJECT-DROP" {
@@ -547,6 +548,7 @@ func handleTCPConn(connCtx C.ConnContext) {
 	}
 	logMetadata(metadata, rule, remoteConn)
 
+	metadata.ProxyType = proxy.Type()
 	remoteConn = statistic.NewTCPTracker(remoteConn, statistic.DefaultManager, metadata, rule, 0, int64(peekLen), true)
 	defer func(remoteConn C.Conn) {
 		_ = remoteConn.Close()
