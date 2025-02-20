@@ -135,6 +135,7 @@ func GetGeneral() *config.General {
 	}
 
 	general := &config.General{
+		HostOverrideDestination: C.HostOverrideDestination.Load(),
 		Inbound: config.Inbound{
 			Port:              ports.Port,
 			SocksPort:         ports.SocksPort,
@@ -404,6 +405,8 @@ func updateGeneral(general *config.General, logging bool) {
 	keepalive.SetKeepAliveIdle(time.Duration(general.KeepAliveIdle) * time.Second)
 	keepalive.SetKeepAliveInterval(time.Duration(general.KeepAliveInterval) * time.Second)
 	keepalive.SetDisableKeepAlive(general.DisableKeepAlive)
+
+	C.HostOverrideDestination.Store(general.HostOverrideDestination)
 
 	adapter.UnifiedDelay.Store(general.UnifiedDelay)
 
