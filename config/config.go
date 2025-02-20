@@ -65,6 +65,7 @@ type General struct {
 	KeepAliveIdle           int               `json:"keep-alive-idle"`
 	KeepAliveInterval       int               `json:"keep-alive-interval"`
 	DisableKeepAlive        bool              `json:"disable-keep-alive"`
+	DisableHostRedir        bool              `json:"disable-host-redir"`
 }
 
 // Inbound config
@@ -405,6 +406,7 @@ type RawConfig struct {
 	KeepAliveIdle           int               `yaml:"keep-alive-idle" json:"keep-alive-idle"`
 	KeepAliveInterval       int               `yaml:"keep-alive-interval" json:"keep-alive-interval"`
 	DisableKeepAlive        bool              `yaml:"disable-keep-alive" json:"disable-keep-alive"`
+	DisableHostRedir        bool              `yaml:"disable-host-redir" json:"disable-host-redir"`
 
 	ProxyProvider map[string]map[string]any `yaml:"proxy-providers" json:"proxy-providers"`
 	RuleProvider  map[string]map[string]any `yaml:"rule-providers" json:"rule-providers"`
@@ -752,6 +754,7 @@ func parseGeneral(cfg *RawConfig) (*General, error) {
 		KeepAliveIdle:           cfg.KeepAliveIdle,
 		KeepAliveInterval:       cfg.KeepAliveInterval,
 		DisableKeepAlive:        cfg.DisableKeepAlive,
+		DisableHostRedir:        cfg.DisableHostRedir,
 	}, nil
 }
 
