@@ -44,6 +44,8 @@ import (
 
 // General config
 type General struct {
+	HostOverrideDestination bool `json:"host-override-destination"`
+
 	Inbound
 	Mode              T.TunnelMode            `json:"mode"`
 	UnifiedDelay      bool                    `json:"unified-delay"`
@@ -389,6 +391,7 @@ type RawTLS struct {
 }
 
 type RawConfig struct {
+	HostOverrideDestination bool                    `yaml:"host-override-destination" json:"host-override-destination"`
 	Port                    int                     `yaml:"port" json:"port"`
 	SocksPort               int                     `yaml:"socks-port" json:"socks-port"`
 	RedirPort               int                     `yaml:"redir-port" json:"redir-port"`
@@ -587,6 +590,7 @@ func DefaultRawConfig() *RawConfig {
 			AllowOrigins:        []string{"*"},
 			AllowPrivateNetwork: true,
 		},
+		HostOverrideDestination: true,
 	}
 }
 
@@ -742,6 +746,7 @@ func parseGeneral(cfg *RawConfig) (*General, error) {
 		log.Errorln("The `global-client-fingerprint` configuration is removed, please set `client-fingerprint` directly on the proxy instead")
 	}
 	return &General{
+		HostOverrideDestination: cfg.HostOverrideDestination,
 		Inbound: Inbound{
 			Port:              cfg.Port,
 			SocksPort:         cfg.SocksPort,
