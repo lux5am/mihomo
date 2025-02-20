@@ -181,6 +181,7 @@ func GetGeneral() *config.General {
 		KeepAliveInterval:       int(keepalive.KeepAliveInterval() / time.Second),
 		KeepAliveIdle:           int(keepalive.KeepAliveIdle() / time.Second),
 		DisableKeepAlive:        keepalive.DisableKeepAlive(),
+		DisableHostForward:      tunnel.DisableHostForward.Load(),
 	}
 
 	return general
@@ -434,6 +435,8 @@ func updateGeneral(general *config.General, logging bool) {
 	keepalive.SetKeepAliveIdle(time.Duration(general.KeepAliveIdle) * time.Second)
 	keepalive.SetKeepAliveInterval(time.Duration(general.KeepAliveInterval) * time.Second)
 	keepalive.SetDisableKeepAlive(general.DisableKeepAlive)
+
+	tunnel.DisableHostForward.Store(general.DisableHostForward)
 
 	adapter.UnifiedDelay.Store(general.UnifiedDelay)
 

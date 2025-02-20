@@ -172,6 +172,8 @@ type Metadata struct {
 	RawDstAddr net.Addr `json:"-"`
 	// Only domain rule
 	SniffHost string `json:"sniffHost"`
+
+	DisableHostForward bool
 }
 
 func (m *Metadata) RemoteAddress() string {
@@ -207,7 +209,21 @@ func (m *Metadata) SourceValid() bool {
 	return m.SrcPort != 0 && m.SrcIP.IsValid()
 }
 
+func (m *Metadata) PreferIPAddrType() int {
+	switch true {
+	case m.DstIP.Is4():
+		return socks5.AtypIPv4
+	case m.Host != "" || !m.DstIP.IsValid():
+		return socks5.AtypDomainName
+	default:
+		return socks5.AtypIPv6
+	}
+}
+
 func (m *Metadata) AddrType() int {
+	if m.DisableHostForward {
+		return m.PreferIPAddrType()
+	}
 	switch true {
 	case m.Host != "" || !m.DstIP.IsValid():
 		return socks5.AtypDomainName
@@ -253,7 +269,20 @@ func (m *Metadata) UDPAddr() *net.UDPAddr {
 	return net.UDPAddrFromAddrPort(m.AddrPort())
 }
 
+func (m *Metadata) PreferIPString() string {
+	if m.DstIP.IsValid() {
+		return m.DstIP.String()
+	} else if m.Host != "" {
+		return m.Host
+	} else {
+		return "<nil>"
+	}
+}
+
 func (m *Metadata) String() string {
+	if m.DisableHostForward {
+		return m.PreferIPString()
+	}
 	if m.Host != "" {
 		return m.Host
 	} else if m.DstIP.IsValid() {

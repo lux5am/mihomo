@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	N "github.com/metacubex/mihomo/common/net"
@@ -67,6 +68,8 @@ var (
 
 	ruleUpdateCallback = utils.NewCallback[provider.RuleProvider]()
 )
+
+var DisableHostForward atomic.Bool
 
 type tunnel struct{}
 
@@ -297,6 +300,8 @@ func preHandleMetadata(metadata *C.Metadata) error {
 		metadata.DstIP = ip
 		metadata.Host = ""
 	}
+
+	metadata.DisableHostForward = DisableHostForward.Load()
 
 	// preprocess enhanced-mode metadata
 	if needLookupIP(metadata) {
