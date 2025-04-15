@@ -12,6 +12,7 @@ import (
 var (
 	keepAliveIdle     = atomic.NewInt64(0)
 	keepAliveInterval = atomic.NewInt64(0)
+	keepAliveCount    = atomic.NewInt32(0)
 	disableKeepAlive  = atomic.NewBool(false)
 
 	SetDisableKeepAliveCallback = utils.NewCallback[bool]()
@@ -25,12 +26,20 @@ func SetKeepAliveInterval(t time.Duration) {
 	keepAliveInterval.Store(int64(t))
 }
 
+func SetKeepAliveCount(c int) {
+	keepAliveCount.Store(int32(c))
+}
+
 func KeepAliveIdle() time.Duration {
 	return time.Duration(keepAliveIdle.Load())
 }
 
 func KeepAliveInterval() time.Duration {
 	return time.Duration(keepAliveInterval.Load())
+}
+
+func KeepAliveCount() int {
+	return int(keepAliveCount.Load())
 }
 
 func SetDisableKeepAlive(disable bool) {
