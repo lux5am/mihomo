@@ -75,6 +75,7 @@ type Inbound struct {
 	Port              int            `json:"port"`
 	SocksPort         int            `json:"socks-port"`
 	RedirPort         int            `json:"redir-port"`
+	RedirUDP          bool           `json:"redir-udp"`
 	TProxyPort        int            `json:"tproxy-port"`
 	MixedPort         int            `json:"mixed-port"`
 	Tun               LC.Tun         `json:"tun"`
@@ -396,6 +397,7 @@ type RawConfig struct {
 	Port                    int                     `yaml:"port" json:"port"`
 	SocksPort               int                     `yaml:"socks-port" json:"socks-port"`
 	RedirPort               int                     `yaml:"redir-port" json:"redir-port"`
+	RedirUDP                bool                    `yaml:"redir-udp" json:"redir-udp"`
 	TProxyPort              int                     `yaml:"tproxy-port" json:"tproxy-port"`
 	MixedPort               int                     `yaml:"mixed-port" json:"mixed-port"`
 	ShadowSocksConfig       string                  `yaml:"ss-config" json:"ss-config"`
@@ -494,6 +496,7 @@ func DefaultRawConfig() *RawConfig {
 		FindProcessMode:   process.FindProcessStrict,
 		GlobalUA:          "clash.meta/" + C.Version,
 		ETagSupport:       true,
+		RedirUDP:          true,
 		DNS: RawDNS{
 			Enable:         false,
 			IPv6:           false,
@@ -750,6 +753,7 @@ func parseGeneral(cfg *RawConfig) (*General, error) {
 			Port:              cfg.Port,
 			SocksPort:         cfg.SocksPort,
 			RedirPort:         cfg.RedirPort,
+			RedirUDP:          cfg.RedirUDP,
 			TProxyPort:        cfg.TProxyPort,
 			MixedPort:         cfg.MixedPort,
 			ShadowSocksConfig: cfg.ShadowSocksConfig,
