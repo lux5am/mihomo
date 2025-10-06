@@ -17,8 +17,9 @@ func (ds *DomainSuffix) RuleType() C.RuleType {
 }
 
 func (ds *DomainSuffix) Match(metadata *C.Metadata, helper C.RuleMatchHelper) (bool, string) {
-	domain := metadata.RuleHost()
-	return strings.HasSuffix(domain, "."+ds.suffix) || domain == ds.suffix, ds.adapter
+	return (metadata.SniffHost != "" && (strings.HasSuffix(metadata.SniffHost, "."+ds.suffix) || metadata.SniffHost == ds.suffix)) ||
+			(metadata.Host != "" && metadata.Host != metadata.SniffHost && (strings.HasSuffix(metadata.Host, "."+ds.suffix) || metadata.Host == ds.suffix)),
+		ds.adapter
 }
 
 func (ds *DomainSuffix) Adapter() string {

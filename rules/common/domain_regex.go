@@ -17,8 +17,13 @@ func (dr *DomainRegex) RuleType() C.RuleType {
 }
 
 func (dr *DomainRegex) Match(metadata *C.Metadata, helper C.RuleMatchHelper) (bool, string) {
-	domain := metadata.RuleHost()
-	match, _ := dr.regex.MatchString(domain)
+	var match bool
+	if metadata.SniffHost != "" {
+		match, _ = dr.regex.MatchString(metadata.SniffHost)
+	}
+	if !match && metadata.Host != "" && metadata.Host != metadata.SniffHost {
+		match, _ = dr.regex.MatchString(metadata.Host)
+	}
 	return match, dr.adapter
 }
 
