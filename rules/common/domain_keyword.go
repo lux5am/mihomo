@@ -17,8 +17,9 @@ func (dk *DomainKeyword) RuleType() C.RuleType {
 }
 
 func (dk *DomainKeyword) Match(metadata *C.Metadata, helper C.RuleMatchHelper) (bool, string) {
-	domain := metadata.RuleHost()
-	return strings.Contains(domain, dk.keyword), dk.adapter
+	return (metadata.SniffHost != "" && strings.Contains(metadata.SniffHost, dk.keyword)) ||
+			(metadata.Host != "" && metadata.Host != metadata.SniffHost && strings.Contains(metadata.Host, dk.keyword)),
+		dk.adapter
 }
 
 func (dk *DomainKeyword) Adapter() string {
