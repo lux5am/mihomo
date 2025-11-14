@@ -276,6 +276,7 @@ func updateDNS(c *config.DNS, generalIPv6 bool) {
 		FakeIPTTL:            c.FakeIPTTL,
 		UseHosts:             c.UseHosts,
 		FakeIPDisableMapping: c.FakeIPDisableMapping,
+		MaxSize:              c.CacheMaxSize,
 	})
 
 	// reuse cache of old host mapper
