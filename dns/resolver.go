@@ -46,6 +46,9 @@ type Resolver struct {
 	fallbackLazyQuery     bool
 	group                 singleflight.Group[*D.Msg]
 	cache                 dnsCache
+	cacheMinTTL           uint32
+	cacheMaxTTL           uint32
+	cacheRewriteTTL       bool
 	policy                []dnsPolicy
 	defaultResolver       *Resolver
 }
@@ -202,7 +205,23 @@ func (r *Resolver) exchangeWithoutCache(ctx context.Context, m *D.Msg) (msg *D.M
 			}
 
 			if cache {
-				putMsgToCache(r.cache, q, result)
+				if r.cacheRewriteTTL {
+					resultCopy := result.Copy()
+					for _, recordList := range [][]D.RR{resultCopy.Answer, resultCopy.Ns, resultCopy.Extra} {
+						for _, record := range recordList {
+							rh := record.Header()
+							if rh.Ttl < r.cacheMinTTL {
+								rh.Ttl = r.cacheMinTTL
+							}
+							if rh.Ttl > r.cacheMaxTTL {
+								rh.Ttl = r.cacheMaxTTL
+							}
+						}
+					}
+					putMsgToCache(r.cache, q, resultCopy)
+				} else {
+					putMsgToCache(r.cache, q, result)
+				}
 			}
 		}()
 
@@ -483,6 +502,8 @@ type Config struct {
 	ProxyServerPolicy    []Policy
 	CacheAlgorithm       string
 	CacheMaxSize         int
+	CacheMinTTL          uint32
+	CacheMaxTTL          uint32
 }
 
 func (config Config) newCache() dnsCache {
@@ -515,6 +536,12 @@ func (rs Resolvers) ResetConnection() {
 	rs.DirectResolver.ResetConnection()
 }
 
+func (r *Resolver) applyConfig(config Config) {
+	r.cacheMinTTL = config.CacheMinTTL
+	r.cacheMaxTTL = config.CacheMaxTTL
+	r.cacheRewriteTTL = config.CacheMinTTL > 0 || config.CacheMaxTTL > 0
+}
+
 func NewResolverFromClient(client dnsClient) *Resolver {
 	return &Resolver{
 		ipv6:  true,
@@ -529,6 +556,7 @@ func NewResolver(config Config) (rs Resolvers) {
 		cache:       config.newCache(),
 		ipv6Timeout: time.Duration(config.IPv6Timeout) * time.Millisecond,
 	}
+	defaultResolver.applyConfig(config)
 
 	var nameServerCache []struct {
 		NameServer
@@ -600,6 +628,7 @@ func NewResolver(config Config) (rs Resolvers) {
 		policy:      makePolicy(config.Policy),
 	}
 	r.defaultResolver = defaultResolver
+	r.applyConfig(config)
 	rs.Resolver = r
 
 	if len(config.ProxyServer) != 0 {
@@ -610,6 +639,7 @@ func NewResolver(config Config) (rs Resolvers) {
 			ipv6Timeout: time.Duration(config.IPv6Timeout) * time.Millisecond,
 			policy:      makePolicy(config.ProxyServerPolicy),
 		}
+		rs.ProxyResolver.applyConfig(config)
 	}
 
 	if len(config.DirectServer) != 0 {
@@ -622,6 +652,7 @@ func NewResolver(config Config) (rs Resolvers) {
 		if config.DirectFollowPolicy {
 			rs.DirectResolver.policy = r.policy
 		}
+		rs.DirectResolver.applyConfig(config)
 	}
 
 	if len(config.Fallback) != 0 {
