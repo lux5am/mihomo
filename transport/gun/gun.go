@@ -63,6 +63,7 @@ type Config struct {
 	UserAgent    string
 	Host         string
 	PingInterval int
+	PingTimeout  int
 }
 
 func (g *Conn) initReader() {
@@ -291,7 +292,7 @@ func NewTransport(dialFn DialFn, tlsConfig *vmess.TLSConfig, gunCfg *Config) *Tr
 		AllowHTTP:          false,
 		DisableCompression: true,
 		ReadIdleTimeout:    time.Duration(gunCfg.PingInterval) * time.Second, // If zero, no health check is performed
-		PingTimeout:        0,
+		PingTimeout:        time.Duration(gunCfg.PingTimeout) * time.Second,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
