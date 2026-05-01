@@ -268,6 +268,8 @@ func updateDNS(c *config.DNS, generalIPv6 bool) {
 		CacheMaxSize:         c.CacheMaxSize,
 		CacheMinTTL:          c.CacheMinTTL,
 		CacheMaxTTL:          c.CacheMaxTTL,
+		CacheOptimistic:      c.CacheOptimistic,
+		CacheOptimisticTTL:   c.CacheOptimisticTTL,
 		CacheRoundRobin:      c.CacheRoundRobin,
 	})
 	m := dns.NewEnhancer(dns.EnhancerConfig{
