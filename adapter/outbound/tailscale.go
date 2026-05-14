@@ -9,11 +9,14 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"runtime"
 	"sync"
 	"time"
 
 	N "github.com/metacubex/mihomo/common/net"
 	"github.com/metacubex/mihomo/component/ca"
+	"github.com/metacubex/mihomo/component/dialer"
+	"github.com/metacubex/mihomo/component/iface/anet"
 	"github.com/metacubex/mihomo/component/resolver"
 	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/dns"
@@ -22,6 +25,7 @@ import (
 
 	"github.com/metacubex/tailscale/envknob"
 	"github.com/metacubex/tailscale/ipn"
+	"github.com/metacubex/tailscale/net/netmon"
 	"github.com/metacubex/tailscale/tsnet"
 	D "github.com/miekg/dns"
 )
@@ -59,8 +63,25 @@ type TailscaleOption struct {
 	ExitNodeAllowLANAccess *bool  `proxy:"exit-node-allow-lan-access,omitempty"`
 }
 
-func NewTailscale(option TailscaleOption) (*Tailscale, error) {
+func init() {
 	envknob.SetNoLogsNoSupport()
+	if runtime.GOOS == "android" { // Android SDK 30 no longer permits Go's net.Interfaces to work (Issue 2293)
+		netmon.RegisterInterfaceGetter(func() (nif []netmon.Interface, err error) {
+			ifaces, err := anet.Interfaces()
+			if err != nil {
+				return nil, err
+			}
+			for _, iff := range ifaces {
+				nif = append(nif, netmon.Interface{
+					Interface: &iff,
+				})
+			}
+			return
+		})
+	}
+}
+
+func NewTailscale(option TailscaleOption) (*Tailscale, error) {
 	if _, err := buildTailscaleMaskedPrefs(option); err != nil {
 		return nil, err
 	}
@@ -294,11 +315,16 @@ func (t *Tailscale) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.
 	if err = t.ensureStarted(ctx); err != nil {
 		return nil, err
 	}
-	address := metadata.RemoteAddress()
-	if err = t.checkTailscaleRoute(ctx, "tcp", address); err != nil {
-		return nil, err
-	}
-	conn, err := t.server.Dial(ctx, "tcp", address)
+	options := t.DialOptions()
+	options = append(options, dialer.WithResolver(t.dnsResolver))
+	options = append(options, dialer.WithNetDialer(dialer.NetDialerFunc(func(ctx context.Context, network, address string) (net.Conn, error) {
+		if err = t.checkTailscaleRoute(ctx, network, address); err != nil {
+			return nil, err
+		}
+		return t.server.Dial(ctx, network, address)
+	})))
+	var conn net.Conn
+	conn, err = dialer.NewDialer(options...).DialContext(ctx, "tcp", metadata.RemoteAddress())
 	if err != nil {
 		return nil, err
 	}
@@ -309,9 +335,6 @@ func (t *Tailscale) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.
 }
 
 func (t *Tailscale) ListenPacketContext(ctx context.Context, metadata *C.Metadata) (_ C.PacketConn, err error) {
-	if !t.option.UDP {
-		return nil, C.ErrNotSupport
-	}
 	if err = t.ensureStarted(ctx); err != nil {
 		return nil, err
 	}
@@ -330,15 +353,12 @@ func (t *Tailscale) ListenPacketContext(ctx context.Context, metadata *C.Metadat
 		return nil, errors.New("packet conn is nil")
 	}
 	rAddr := metadata.UDPAddr()
-	if rAddr == nil {
-		return nil, errors.New("packet destination is invalid")
-	}
 	return newPacketConn(N.NewThreadSafePacketConn(&tailscaleConnPacketConn{Conn: conn, rAddr: rAddr}), t), nil
 }
 
 func (t *Tailscale) ResolveUDP(ctx context.Context, metadata *C.Metadata) error {
-	if !metadata.Resolved() && metadata.Host != "" {
-		ip, err := t.resolveIPWithTransport(ctx, metadata.Host)
+	if metadata.Host != "" {
+		ip, err := resolveIPWithResolver(ctx, metadata.Host, t.prefer, t.dnsResolver)
 		if err != nil {
 			return fmt.Errorf("can't resolve ip: %w", err)
 		}
@@ -356,19 +376,6 @@ func (t *Tailscale) checkTailscaleRoute(ctx context.Context, network, address st
 		return fmt.Errorf("destination %s is not routed by Tailscale; configure exit-node or accept an advertised subnet route", ipp)
 	}
 	return nil
-}
-
-func (t *Tailscale) resolveIPWithTransport(ctx context.Context, host string) (netip.Addr, error) {
-	switch t.option.IPVersion {
-	case C.IPv4Only:
-		return resolver.ResolveIPv4WithResolver(ctx, host, t.dnsResolver)
-	case C.IPv6Only:
-		return resolver.ResolveIPv6WithResolver(ctx, host, t.dnsResolver)
-	case C.IPv6Prefer:
-		return resolver.ResolveIPPrefer6WithResolver(ctx, host, t.dnsResolver)
-	default:
-		return resolver.ResolveIPWithResolver(ctx, host, t.dnsResolver)
-	}
 }
 
 type tailscaleDNSTransport struct {
