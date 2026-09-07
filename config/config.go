@@ -338,6 +338,9 @@ type RawTun struct {
 	// darwin special config
 	RecvMsgX bool `yaml:"recvmsgx" json:"recvmsgx,omitempty"`
 	SendMsgX bool `yaml:"sendmsgx" json:"sendmsgx,omitempty"`
+
+	// gvisor special config (Non-public option; do not include it in the document.)
+	ProcessorsPerChannel int `yaml:"processors-per-channel" json:"processors-per-channel,omitempty"`
 }
 
 type RawTuicServer struct {
@@ -557,15 +560,16 @@ func DefaultRawConfig() *RawConfig {
 			Interval:      30,
 		},
 		Tun: RawTun{
-			Enable:              false,
-			Device:              "",
-			Stack:               C.TunGvisor,
-			DNSHijack:           []string{"0.0.0.0:53"}, // default hijack all dns query
-			AutoRoute:           true,
-			AutoDetectInterface: true,
-			Inet6Address:        []netip.Prefix{netip.MustParsePrefix("fdfe:dcba:9876::1/126")},
-			RecvMsgX:            true,
-			SendMsgX:            false, // In the current implementation, if enabled, the kernel may freeze during multi-thread downloads, so it is disabled by default.
+			Enable:               false,
+			Device:               "",
+			Stack:                C.TunGvisor,
+			DNSHijack:            []string{"0.0.0.0:53"}, // default hijack all dns query
+			AutoRoute:            true,
+			AutoDetectInterface:  true,
+			Inet6Address:         []netip.Prefix{netip.MustParsePrefix("fdfe:dcba:9876::1/126")},
+			RecvMsgX:             true,
+			SendMsgX:             false, // In the current implementation, if enabled, the kernel may freeze during multi-thread downloads, so it is disabled by default.
+			ProcessorsPerChannel: 1,     // For most users, memory usage is more important than peak performance. Setting this to 1 can significantly reduce memory consumption.
 		},
 		TuicServer: RawTuicServer{
 			Enable:                false,
@@ -1761,6 +1765,8 @@ func parseTun(rawTun RawTun, dns *DNS, general *General) error {
 
 		RecvMsgX: rawTun.RecvMsgX,
 		SendMsgX: rawTun.SendMsgX,
+
+		ProcessorsPerChannel: rawTun.ProcessorsPerChannel,
 	}
 
 	return nil
